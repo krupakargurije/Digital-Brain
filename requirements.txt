@@ -1,0 +1,24 @@
+# Core functionality
+opencv-python-headless
+deepface
+sounddevice
+scipy
+speechbrain
+huggingface-hub<0.26.0
+torch
+torchaudio
+tf-keras
+
+# Vector Database
+chromadb
+
+# LLM Orchestration
+langchain
+langchain-google-genai
+
+# Utils
+numpy<2.0
+python-dotenv
+flask-cors
+av
+soundfile

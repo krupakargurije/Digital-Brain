@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Brain Web</title>
+    <!-- Modern Sans-Serif Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --bot-bg: rgba(59, 130, 246, 0.15);
+            --bot-border: rgba(59, 130, 246, 0.3);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            width: 100%;
+            padding: 2rem;
+            gap: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Left Side: Video & Controls */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            max-width: 50%;
+        }
+
+        .video-container {
+            flex: 1;
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--glass-border);
+        }
+
+        #videoFeed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera feed */
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            background: var(--glass-bg);
+            padding: 1.5rem;
+            border-radius: 20px;
+            border: 1px solid var(--glass-border);
+            align-items: center;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+        }
+
+        .controls p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        button.primary-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        button.primary-btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.5);
+        }
+
+        button.primary-btn:disabled {
+            background: #334155;
+            color: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Right Side: Chat Window */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            backdrop-filter: blur(12px);
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .chat-header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--glass-border);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .chat-header h2 {
+            margin: 0;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            background: #22c55e;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 10px #22c55e;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 1rem 1.25rem;
+            border-radius: 16px;
+            line-height: 1.5;
+            font-size: 1rem;
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        .bot-msg {
+            background: var(--bot-bg);
+            border: 1px solid var(--bot-border);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .user-msg {
+            background: var(--accent);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+            color: white;
+            box-shadow: 0 4px 15px -5px rgba(59, 130, 246, 0.4);
+        }
+
+        .system-msg {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin: 0.5rem 0;
+            padding: 0.5rem 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 20px;
+            align-self: center;
+        }
+
+        .chat-input {
+            padding: 1.5rem 2rem;
+            border-top: 1px solid var(--glass-border);
+            display: flex;
+            gap: 1rem;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            color: white;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            display: none;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Side: Interactive Video Feed -->
+        <div class="left-panel">
+            <div class="video-container">
+                <img id="videoFeed" src="/video_feed" alt="Video Feed Loading...">
+            </div>
+            <div class="controls">
+                <p>Welcome! Click the button below and speak for 3 seconds.</p>
+                <button id="btnRecognize" class="primary-btn" onclick="startRecognition()">
+                    <span class="loader" id="recLoader"></span>
+                    <span id="btnText">Identify Me (Face & Voice)</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Right Side: Interaction Chat Window -->
+        <div class="right-panel">
+            <div class="chat-header">
+                <h2><span class="status-dot"></span> Digital Brain Chat</h2>
+                <div id="userInfo" style="color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.5rem; font-weight: 300;">User: Not Identified | Awaiting Input</div>
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                <div class="system-msg">Awaiting identification... Click 'Identify Me' to begin.</div>
+            </div>
+            
+            <div class="chat-input fade-in">
+                <input type="text" id="userInput" placeholder="Type your message here..." disabled onkeypress="handleKeyPress(event)">
+                <button id="btnSend" class="primary-btn" style="width: auto;" onclick="sendMessage()" disabled>Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUserId = null;
+
+        function addMessage(text, isUser) {
+            const chatBox = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isUser ? 'user-msg' : 'bot-msg'}`;
+            msgDiv.innerText = text;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            const chatBox = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'system-msg';
+            msgDiv.innerText = text;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Action when 'Identify Me' is clicked
+        async function startRecognition() {
+            const btn = document.getElementById('btnRecognize');
+            const loader = document.getElementById('recLoader');
+            const btnText = document.getElementById('btnText');
+            
+            btn.disabled = true;
+            loader.style.display = 'block';
+            btnText.textContent = " Recording 3s Audio...";
+            
+            addSystemMessage("Capturing face snapshot and recording 3 seconds of audio...");
+
+            try {
+                // Hits the backend Flask route holding the synchronous multimodal pipeline
+                const response = await fetch('/api/identify', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.error) {
+                    addSystemMessage(`Error: ${data.error}`);
+                } else {
+                    currentUserId = data.user_id;
+                    const userName = data.profile ? data.profile.name : 'Unknown User';
+                    document.getElementById('userInfo').innerText = `User: ${userName} | Status: ${data.status}`;
+                    
+                    addSystemMessage(`Identification Complete. Result: ${data.status}`);
+                    
+                    if (data.greeting) {
+                        addMessage(data.greeting, false);
+                    }
+                    
+                    // Enable chat inputs
+                    document.getElementById('userInput').disabled = false;
+                    document.getElementById('btnSend').disabled = false;
+                    document.getElementById('userInput').focus();
+                }
+            } catch (err) {
+                addSystemMessage("Failed to communicate with the server backend.");
+                console.error(err);
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+                btnText.textContent = " Identify Me";
+            }
+        }
+
+        // Action when typing a new message
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if (!text || !currentUserId) return;
+            
+            input.value = '';
+            addMessage(text, true);
+            
+            const btnSend = document.getElementById('btnSend');
+            btnSend.disabled = true;
+            addSystemMessage("Digital Brain is thinking...");
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: currentUserId, message: text })
+                });
+                
+                const data = await response.json();
+                
+                // Remove the "thinking" system message
+                const msgs = document.getElementById('chatMessages');
+                msgs.removeChild(msgs.lastChild);
+                
+                if (data.error) {
+                    addSystemMessage(`Error: ${data.error}`);
+                } else {
+                    addMessage(data.response, false);
+                    
+                    // Update user name in top bar incase they declared it in chat
+                    if (data.profile) {
+                         document.getElementById('userInfo').innerText = `User: ${data.profile.name} | Status: Active Session`;
+                    }
+                }
+            } catch (err) {
+                addSystemMessage("Failed to send message to the brain.");
+            } finally {
+                btnSend.disabled = false;
+                input.focus();
+            }
+        }
+        
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        }
+    </script>
+</body>
+</html>
