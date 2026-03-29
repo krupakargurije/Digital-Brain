@@ -9,7 +9,15 @@ function App() {
     const webcamRef = useRef(null);
     const canvasRef = useRef(null);
     const isRecordingRef = useRef(false);
-    const hasGreetedRef = useRef(false);
+    const activeUserIdRef = useRef(null);
+    const lastFrameDataRef = useRef(null);
+    const motionCanvasRef = useRef(null);
+    const detectedFacesRef = useRef([]);
+    const isPollingRef = useRef(false);
+    const isInputFocusedRef = useRef(false);
+    const isAutoDetectEnabledRef = useRef(true);
+    // ...
+    const [isAutoDetectEnabled, setIsAutoDetectEnabled] = useState(true);
     const [isRecording, setIsRecording] = useState(false);
     const [isIdentifying, setIsIdentifying] = useState(false);
     const [userProfile, setUserProfile] = useState(null);
@@ -78,10 +86,15 @@ function App() {
                 }
 
                 const wavBlob = encodeWAV(combined, audioContext.sampleRate);
+                
+                // IMPORTANT: Close the hardware audio context to prevent browser crashing after 6 clicks
+                await audioContext.close();
+                
                 const reader = new FileReader();
                 reader.readAsDataURL(wavBlob);
                 reader.onloadend = async () => {
                     const base64Audio = reader.result;
+                    setMessages(prev => [...prev, { sender: 'system', text: "Analyzing Identity in Brain (Face + Voice)..." }]);
                     await sendIdentifyRequest(imageSrc, base64Audio);
                 };
             }, 3000);
@@ -192,38 +205,144 @@ function App() {
     // Polling Loop Effect
     // Auto polling effect
     const pollBackend = async () => {
-        if (isRecording || isIdentifying) return; // Don't interrupt voice recognition
+        if (isRecording || isIdentifying || isPollingRef.current) return; // Don't interrupt voice recognition or overlap
 
         const imageSrc = captureImage();
         if (!imageSrc) return;
 
+        isPollingRef.current = true;
         try {
             const res = await axios.post(`${API_URL}/poll_vision`, { image: imageSrc });
             const faces = res.data.faces || [];
             setDetectedFaces(faces);
+            detectedFacesRef.current = faces;
             drawBoundingBoxes(faces);
 
-            // Auto-update main user profile if someone new appears and we don't have an active user
-            if (faces.length > 0 && !hasGreetedRef.current) {
-                hasGreetedRef.current = true;
-                // Focus on the first face
-                const p = faces[0];
-                setUserProfile({ user_id: p.user_id, name: p.name, status: "Auto-Detected" });
-                if (p.is_new) {
-                    setMessages(prev => [...prev, { sender: 'assistant', text: "Hello! I noticed you are new here. I'm Digital Brain. What is your name?" }]);
-                } else {
-                    setMessages(prev => [...prev, { sender: 'assistant', text: `Welcome back, ${p.name}!` }]);
+            // Auto-update main user profile if someone new appears
+            if (faces.length > 0) {
+                // If the currently active chatting user is no longer in the frame, but someone else is
+                const activeFaceStillPresent = faces.find(f => f.user_id === activeUserIdRef.current);
+                
+                if (!activeFaceStillPresent) {
+                    const newFocus = faces[0];
+                    activeUserIdRef.current = newFocus.user_id; // Switch active context
+                    
+                    setUserProfile({ user_id: newFocus.user_id, name: newFocus.name, status: "Auto-Detected" });
+                    
+                    if (newFocus.is_new) {
+                        setMessages(prev => [...prev, { sender: 'assistant', text: "Hello! I noticed you are new here. I'm Digital Brain. What is your name?" }]);
+                    } else {
+                        setMessages(prev => [...prev, { sender: 'assistant', text: `Welcome back, ${newFocus.name}! Switching conversation context.` }]);
+                    }
                 }
             }
         } catch (error) {
             // Silently fail continuous polling to not spam console
+        } finally {
+            isPollingRef.current = false;
+        }
+    };
+
+    // Motion Detection Setup and Logic
+    const checkMotion = () => {
+        if (isRecording || isIdentifying || isInputFocusedRef.current) return false;
+        const video = webcamRef.current?.video;
+        if (!video || video.readyState !== 4) return false;
+
+        if (!motionCanvasRef.current) {
+            const canvas = document.createElement("canvas");
+            canvas.width = 64;
+            canvas.height = 48;
+            motionCanvasRef.current = canvas;
+        }
+
+        const motionCanvas = motionCanvasRef.current;
+        const ctx = motionCanvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(video, 0, 0, motionCanvas.width, motionCanvas.height);
+        
+        const currentFrame = ctx.getImageData(0, 0, motionCanvas.width, motionCanvas.height);
+        const currentData = currentFrame.data;
+        const lastData = lastFrameDataRef.current;
+
+        let motionDetected = false;
+
+        if (lastData) {
+            let diffPixels = 0;
+            
+            const faces = detectedFacesRef.current;
+            const videoW = video.videoWidth;
+            const videoH = video.videoHeight;
+            const motionW = motionCanvas.width;
+            const motionH = motionCanvas.height;
+
+            // Map face bounding boxes to the motion canvas scale and add padding (75% margin to ignore shifting)
+            const paddedBoxes = faces.map(f => {
+                const bx = (f.box.x / videoW) * motionW;
+                const by = (f.box.y / videoH) * motionH;
+                const bw = (f.box.w / videoW) * motionW;
+                const bh = (f.box.h / videoH) * motionH;
+                
+                const marginX = bw * 0.75;
+                const marginY = bh * 0.75;
+                
+                return {
+                    x: Math.max(0, bx - marginX),
+                    y: Math.max(0, by - marginY),
+                    w: bw + marginX * 2,
+                    h: bh + marginY * 2
+                };
+            });
+
+            for (let y = 0; y < motionH; y++) {
+                for (let x = 0; x < motionW; x++) {
+                    // Check if current pixel is inside any known face box
+                    let insideUser = false;
+                    for (const box of paddedBoxes) {
+                        if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) {
+                            insideUser = true;
+                            break;
+                        }
+                    }
+                    if (insideUser) continue; // Ignore motion from existing users
+
+                    const i = (y * motionW + x) * 4;
+                    const diffR = Math.abs(currentData[i] - lastData[i]);
+                    const diffG = Math.abs(currentData[i + 1] - lastData[i + 1]);
+                    const diffB = Math.abs(currentData[i + 2] - lastData[i + 2]);
+                    
+                    // Average difference > threshold
+                    if ((diffR + diffG + diffB) / 3 > 45) {
+                        diffPixels++;
+                    }
+                }
+            }
+
+            // If more than 3% of pixels changed (outside of known users)
+            const motionThreshold = (motionW * motionH) * 0.03;
+            if (diffPixels > motionThreshold) {
+                motionDetected = true;
+            }
+        }
+
+        // Save current frame for next tick
+        lastFrameDataRef.current = new Uint8ClampedArray(currentData);
+        return motionDetected;
+    };
+
+    const checkMotionAndPoll = async () => {
+        if (!isAutoDetectEnabledRef.current) return;
+        const hasMotion = checkMotion();
+        if (hasMotion) {
+            pollBackend();
         }
     };
 
     // Trigger polling loop
     useEffect(() => {
-        const intervalId = setInterval(pollBackend, 1500);
-        return () => clearInterval(intervalId);
+        const intervalId = setInterval(checkMotionAndPoll, 500); // Check motion every 500ms
+        return () => {
+            clearInterval(intervalId);
+        };
     }, [isRecording, isIdentifying, userProfile]);
 
     return (
@@ -254,33 +373,102 @@ function App() {
                     />
                 </div>
                 <div className="controls">
-                    <p>Welcome! Click the button below and speak for 3 seconds.</p>
-                    <button
-                        className="primary-btn"
-                        onClick={handleIdentify}
-                        disabled={isIdentifying || isRecording}
-                    >
-                        {isRecording ? (
-                            <><Mic className="animate-pulse" /> Recording 3s Audio...</>
-                        ) : isIdentifying ? (
-                            <><Loader2 className="animate-spin" /> Processing...</>
-                        ) : (
-                            <><UserCircle2 /> Identify Me (Face & Voice)</>
-                        )}
-                    </button>
+                    <p>Welcome! Scan your face & voice to log in.</p>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '10px' }}>
+                        <button
+                            className="primary-btn"
+                            onClick={handleIdentify}
+                            disabled={isIdentifying || isRecording}
+                        >
+                            {isRecording ? (
+                                <><Mic className="animate-pulse" /> Recording 3s Audio...</>
+                            ) : isIdentifying ? (
+                                <><Loader2 className="animate-spin" /> Processing...</>
+                            ) : (
+                                <><UserCircle2 /> Quick Identify</>
+                            )}
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {/* Right Side: Interaction Chat Window */}
             <div className="right-panel">
-                <div className="chat-header">
-                    <h2>
-                        <BrainCircuit className="text-blue-500" />
-                        <span className="status-dot"></span>
-                        Digital Brain Chat
-                    </h2>
-                    <div className="user-info">
-                        User: {userProfile ? userProfile.name : 'Not Identified'} | {userProfile ? userProfile.status : 'Awaiting Input'}
+                <div className="chat-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                        <h2>
+                            <BrainCircuit className="text-blue-500" />
+                            <span className="status-dot"></span>
+                            Digital Brain Chat
+                        </h2>
+                        <div className="user-info">
+                            User: {userProfile ? userProfile.name : 'Not Identified'} | {userProfile ? userProfile.status : 'Awaiting Input'}
+                        </div>
+                    </div>
+                    
+                    {/* Top Right Buttons */}
+                    <div style={{ display: 'flex', gap: '8px', zIndex: 10 }}>
+                        <button
+                            style={{
+                                padding: '6px 12px',
+                                borderRadius: '20px',
+                                backgroundColor: isAutoDetectEnabled ? 'rgba(16, 185, 129, 0.9)' : 'rgba(107, 114, 128, 0.9)',
+                                color: 'white',
+                                border: 'none',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                                transition: 'all 0.3s ease'
+                            }}
+                            onClick={() => {
+                                const nextState = !isAutoDetectEnabled;
+                                setIsAutoDetectEnabled(nextState);
+                                isAutoDetectEnabledRef.current = nextState;
+                                if (!nextState) {
+                                    setDetectedFaces([]);
+                                    detectedFacesRef.current = [];
+                                    drawBoundingBoxes([]);
+                                }
+                            }}
+                            disabled={isIdentifying || isRecording}
+                        >
+                            <span style={{
+                                width: '8px', 
+                                height: '8px', 
+                                backgroundColor: isAutoDetectEnabled ? '#fff' : '#d1d5db', 
+                                borderRadius: '50%', 
+                                display: 'inline-block',
+                                boxShadow: isAutoDetectEnabled ? '0 0 5px #fff' : 'none'
+                            }} />
+                            AUTO DETECT
+                        </button>
+
+                        <button
+                            style={{
+                                padding: '6px 12px',
+                                borderRadius: '20px',
+                                backgroundColor: isRecording ? 'rgba(239, 68, 68, 0.9)' : 'rgba(59, 130, 246, 0.9)',
+                                color: 'white',
+                                border: 'none',
+                                cursor: isIdentifying ? 'not-allowed' : 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                                transition: 'all 0.3s ease'
+                            }}
+                            onClick={handleIdentify}
+                            disabled={isIdentifying || isRecording}
+                        >
+                            {isRecording ? <Mic size={14} className="animate-pulse" /> : <Mic size={14} />}
+                            {isRecording ? "RECORDING..." : "VOICE RECOGNITION"}
+                        </button>
                     </div>
                 </div>
 
@@ -303,6 +491,8 @@ function App() {
                         placeholder="Type your message here..."
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
+                        onFocus={() => isInputFocusedRef.current = true}
+                        onBlur={() => isInputFocusedRef.current = false}
                         disabled={!userProfile || isThinking}
                     />
                     <button

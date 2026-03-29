@@ -13,8 +13,7 @@ tf-keras
 chromadb
 
 # LLM Orchestration
-langchain
-langchain-google-genai
+openai
 
 # Utils
 numpy<2.0

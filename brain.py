@@ -1,30 +1,29 @@
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
 class BrainModule:
     """
-    Handles LLM Orhcestration using LangChain. 
+    Handles LLM Orchestration using the OpenAI Python client over Nvidia's API.
     It takes user history and context to generate personalized responses.
     """
-    def __init__(self, model_name="gemini-2.0-flash", temperature=0.7):
-        # Requires GOOGLE_API_KEY environment variable to be set
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            print("WARNING: GOOGLE_API_KEY environment variable not set. LLM calls will fail.")
-            
-        self.llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            api_key=api_key
+    def __init__(self, model_name="meta/llama-3.1-8b-instruct", temperature=0.7):
+        # We use the provided Nvidia API endpoint and key
+        api_key = "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"
+        
+        self.model_name = model_name
+        self.temperature = temperature
+        
+        self.client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key,
+            timeout=10.0
         )
         
         # Define the system prompt template
-        self.system_prompt = """
+        self.system_prompt_template = """
         You are "Digital Brain", a highly intelligent, personalized AI assistant.
         Your goal is to be helpful, concise, and friendly.
         
@@ -33,41 +32,24 @@ class BrainModule:
         When responding, consider the user's past interactions and preferences. 
         If they refer to past conversations, use the provided history to answer.
         """
-        
-        self.prompt_template = ChatPromptTemplate.from_messages([
-            ("system", self.system_prompt),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", "{input}")
-        ])
-        
-        # Create the LangChain run chain
-        self.chain = self.prompt_template | self.llm
-        print("BrainModule (LLM) initialized.")
+        print("BrainModule (Nvidia Phi-4) initialized.")
 
     def format_history(self, raw_history):
         """
-        Converts the raw history from SQLite into LangChain message objects.
+        Converts the raw history from SQLite into OpenAI dict objects.
         raw_history format: [(role, message), (role, message), ...]
         """
-        langchain_history = []
+        openai_history = []
         for role, message in raw_history:
             if role == "user":
-                langchain_history.append(HumanMessage(content=message))
+                openai_history.append({"role": "user", "content": message})
             elif role in ["assistant", "system", "ai"]:
-                langchain_history.append(AIMessage(content=message))
-        return langchain_history
+                openai_history.append({"role": "assistant", "content": message})
+        return openai_history
 
     def generate_response(self, user_input, user_profile, chat_history):
         """
         Generates a response from the LLM given the input and context.
-        
-        Args:
-            user_input: The text the user just said/typed.
-            user_profile: Dict containing user info, e.g. {"user_id": "...", "name": "..."}
-            chat_history: List of tuples from the DB [(role, msg), ...]
-            
-        Returns:
-            The text response from the LLM.
         """
         
         # Determine user context for the prompt
@@ -79,30 +61,40 @@ class BrainModule:
             user_context = "This is a new user who has not provided their name yet. \
             Politely ask for their name so you can remember them."
 
-        # Format history for LangChain
-        formatted_history = self.format_history(chat_history)
+        system_prompt = self.system_prompt_template.replace("{user_context}", user_context)
+
+        # Format history for OpenAI
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(self.format_history(chat_history))
         
         try:
-            # Gemini strictly requires the final message to be from a human. 
             # If the user input is empty (e.g. initial greeting), provide a silent prompt.
             if not user_input.strip():
                 user_input = "Hello! Please greet me."
                 
-            # Invoke the chain
-            response = self.chain.invoke({
-                "user_context": user_context,
-                "history": formatted_history,
-                "input": user_input
-            })
-            return response.content
+            messages.append({"role": "user", "content": user_input})
+                
+            completion = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=1024,
+                stream=True
+            )
+            
+            # NVIDIA API heavily prefers streaming to prevent proxy timeouts
+            full_response = ""
+            for chunk in completion:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    
+            return full_response
         except Exception as e:
             print(f"Error generating LLM response: {e}")
             return "I'm sorry, I'm having trouble connecting to my brain right now."
 
 # Simple test block
 if __name__ == "__main__":
-    # Note: This test requires a valid GOOGLE_API_KEY environment variable
-    # export GOOGLE_API_KEY="AIza..."
     brain = BrainModule()
     
     mock_profile = {"user_id": "123", "name": "Sarah"}
@@ -118,4 +110,4 @@ if __name__ == "__main__":
         response = brain.generate_response(user_input, mock_profile, mock_history)
         print(f"\nLLM Response: {response}")
     except Exception as e:
-        print(f"Test failed (make sure API key is set): {e}")
+        print(f"Test failed: {e}")

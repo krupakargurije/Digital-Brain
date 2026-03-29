@@ -62,7 +62,7 @@ class MemoryModule:
 
     # --- Vector DB Operations ---
 
-    def match_user(self, face_embedding=None, voice_embedding=None, threshold=0.75):
+    def match_user(self, face_embedding=None, voice_embedding=None, threshold=0.80):
         """
         Attempts to match the given embeddings against the database.
         ChromaDB returns distance. Since we use cosine distance, distance = 1 - cosine_similarity.
@@ -97,14 +97,14 @@ class MemoryModule:
                     best_voice_match = results["ids"][0][0] # user_id
 
         # Reconciliation Logic
-        if best_face_match is not None and best_face_match == best_voice_match:
+        if face_embedding is not None:
+            # If we have a visual face, we MUST rely strictly on it.
+            # If the face doesn't match, it is definitively a new person.
+            # We ignore random voice matches (like background fan noise or silence) if the face is new!
             return best_face_match
-        elif best_face_match is not None:
-            return best_face_match # Face is usually highly reliable
-        elif best_voice_match is not None:
+        else:
+            # Only rely purely on voice if the camera is disabled or no face was detected
             return best_voice_match
-            
-        return None # No confident match found
 
     def register_new_user(self, face_embedding=None, voice_embedding=None):
         """

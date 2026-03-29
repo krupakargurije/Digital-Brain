@@ -76,6 +76,8 @@ def identify():
         status_msg = "Recognized Existing User"
         
     profile = memory.get_user_profile(matched_user_id)
+    if not profile:
+        profile = {"user_id": matched_user_id, "name": "Unknown User"}
     history = memory.get_chat_history(matched_user_id)
     
     # 4. Generate initial greeting via Gemini
@@ -85,7 +87,8 @@ def identify():
         prompt = f"The user {profile['name']} just returned. Acknowledge their return warmly based on past context."
         
     greeting = brain.generate_response(prompt, profile, history)
-    memory.add_chat_message(matched_user_id, "assistant", greeting)
+    if not greeting.startswith("I'm sorry, I'm having trouble"):
+        memory.add_chat_message(matched_user_id, "assistant", greeting)
     
     return jsonify({
         "user_id": matched_user_id,
@@ -127,7 +130,9 @@ def poll_vision():
                 is_new = True
                 
             profile = memory.get_user_profile(matched_user_id)
-            
+            if not profile:
+                profile = {"user_id": matched_user_id, "name": "Unknown User"}
+                
             faces_data.append({
                 "user_id": matched_user_id,
                 "name": profile["name"] if profile else "Unknown User",
@@ -155,19 +160,25 @@ def chat():
         
     # Check for name update logic (simple heuristic algorithm)
     profile = memory.get_user_profile(user_id)
-    if profile['name'] == "Unknown User" and "my name is" in user_msg.lower():
-        words = user_msg.split()
-        name = words[-1].strip('.').capitalize()
-        memory.update_user_name(user_id, name)
-        profile = memory.get_user_profile(user_id)
-        print(f"[System] Updated user name to {name}")
+    if not profile:
+        profile = {"user_id": user_id, "name": "Unknown User"}
+        
+    if profile['name'] == "Unknown User":
+        lower_msg = user_msg.lower()
+        if "my name is " in lower_msg or "i am " in lower_msg or "call me " in lower_msg:
+            words = user_msg.split()
+            name = words[-1].strip('.').capitalize()
+            memory.update_user_name(user_id, name)
+            profile = memory.get_user_profile(user_id)
+            print(f"[System] Updated user name to {name}")
         
     memory.add_chat_message(user_id, "user", user_msg)
     history = memory.get_chat_history(user_id)
     
     # Generate contextual LLM response
     response = brain.generate_response(user_msg, profile, history)
-    memory.add_chat_message(user_id, "assistant", response)
+    if not response.startswith("I'm sorry, I'm having trouble"):
+        memory.add_chat_message(user_id, "assistant", response)
     
     return jsonify({
         "response": response,
