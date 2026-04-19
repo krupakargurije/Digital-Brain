@@ -16,6 +16,7 @@ function App() {
     const isPollingRef = useRef(false);
     const isInputFocusedRef = useRef(false);
     const isAutoDetectEnabledRef = useRef(true);
+    const sessionPersonMapRef = useRef({});
     // ...
     const [isAutoDetectEnabled, setIsAutoDetectEnabled] = useState(true);
     const [isRecording, setIsRecording] = useState(false);
@@ -86,10 +87,10 @@ function App() {
                 }
 
                 const wavBlob = encodeWAV(combined, audioContext.sampleRate);
-                
+
                 // IMPORTANT: Close the hardware audio context to prevent browser crashing after 6 clicks
                 await audioContext.close();
-                
+
                 const reader = new FileReader();
                 reader.readAsDataURL(wavBlob);
                 reader.onloadend = async () => {
@@ -175,30 +176,90 @@ function App() {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Calculate scaling factors if the video's natural resolution differs from CSS display
-        const scaleX = displayWidth / video.videoWidth;
-        const scaleY = displayHeight / video.videoHeight;
+        // Correct aspect ratio scaling for object-fit: cover offset bounds
+        const videoRatio = video.videoWidth / video.videoHeight;
+        const domRatio = displayWidth / displayHeight;
 
-        faces.forEach(face => {
+        let scale, offsetX, offsetY;
+        if (domRatio > videoRatio) {
+            scale = displayWidth / video.videoWidth;
+            offsetX = 0;
+            offsetY = (displayHeight - video.videoHeight * scale) / 2;
+        } else {
+            scale = displayHeight / video.videoHeight;
+            offsetX = (displayWidth - video.videoWidth * scale) / 2;
+            offsetY = 0;
+        }
+
+        const isPrimaryUser = (face) => face.user_id === activeUserIdRef.current;
+
+        faces.forEach((face) => {
             const box = face.box;
-            const x = box.x * scaleX;
-            const y = box.y * scaleY;
-            const w = box.w * scaleX;
-            const h = box.h * scaleY;
+            const x = box.x * scale + offsetX;
+            const y = box.y * scale + offsetY;
+            const w = box.w * scale;
+            const h = box.h * scale;
+            
+            if (!sessionPersonMapRef.current[face.user_id]) {
+                sessionPersonMapRef.current[face.user_id] = Object.keys(sessionPersonMapRef.current).length + 1;
+            }
+            const personNo = sessionPersonMapRef.current[face.user_id];
+            
+            const isKnown = face.name && face.name.trim() !== '' && face.name !== 'Unknown User';
+            const displayName = isKnown ? face.name : `Person ${personNo} (New)`;
 
-            // Draw Box
-            ctx.strokeStyle = '#3b82f6';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x, y, w, h);
+            // ── White corner markers ──
+            const cornerLen = Math.min(w, h) * 0.25;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = 'round';
 
-            // Draw Background for Text
-            ctx.fillStyle = '#3b82f6';
-            ctx.fillRect(x, y - 30, w, 30);
+            // Top-left
+            ctx.beginPath();
+            ctx.moveTo(x, y + cornerLen);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x + cornerLen, y);
+            ctx.stroke();
 
-            // Draw Name
-            ctx.fillStyle = 'white';
-            ctx.font = 'bold 16px Inter, sans-serif';
-            ctx.fillText(`Hi, ${face.name}!`, x + 5, y - 10);
+            // Top-right
+            ctx.beginPath();
+            ctx.moveTo(x + w - cornerLen, y);
+            ctx.lineTo(x + w, y);
+            ctx.lineTo(x + w, y + cornerLen);
+            ctx.stroke();
+
+            // Bottom-left
+            ctx.beginPath();
+            ctx.moveTo(x, y + h - cornerLen);
+            ctx.lineTo(x, y + h);
+            ctx.lineTo(x + cornerLen, y + h);
+            ctx.stroke();
+
+            // Bottom-right
+            ctx.beginPath();
+            ctx.moveTo(x + w - cornerLen, y + h);
+            ctx.lineTo(x + w, y + h);
+            ctx.lineTo(x + w, y + h - cornerLen);
+            ctx.stroke();
+
+            // ── Name label above the box ──
+            ctx.font = 'bold 13px "Inter", "Segoe UI", sans-serif';
+            const nameW = ctx.measureText(displayName).width;
+            const labelPadH = 8;
+            const labelH = 22;
+            const labelW = nameW + labelPadH * 2;
+            const labelX = x;
+            const labelY = y > labelH + 4 ? y - labelH - 4 : y + h + 4;
+
+            // Label background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.beginPath();
+            ctx.roundRect(labelX, labelY, labelW, labelH, 4);
+            ctx.fill();
+
+            // Label text
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.fillText(displayName, labelX + labelPadH, labelY + 15);
         });
     };
 
@@ -220,18 +281,25 @@ function App() {
 
             // Auto-update main user profile if someone new appears
             if (faces.length > 0) {
-                // If the currently active chatting user is no longer in the frame, but someone else is
                 const activeFaceStillPresent = faces.find(f => f.user_id === activeUserIdRef.current);
+                const newUnknownFace = faces.find(f => f.is_new || f.name === 'Unknown User');
                 
-                if (!activeFaceStillPresent) {
+                if (newUnknownFace && newUnknownFace.user_id !== activeUserIdRef.current) {
+                    // Update the active context to the new/unknown face
+                    activeUserIdRef.current = newUnknownFace.user_id;
+                    const personNo = sessionPersonMapRef.current[newUnknownFace.user_id] || '?';
+                    setUserProfile({ user_id: newUnknownFace.user_id, name: `Person ${personNo}`, status: "Pending Identify" });
+                    
+                    setMessages(prev => [...prev, { 
+                        sender: 'assistant', 
+                        text: `I noticed a new face! Person ${personNo}, could you please tell me your name so I can update my memory?`
+                    }]);
+                } else if (!activeFaceStillPresent && !newUnknownFace) {
+                    // Switch back to an existing known user if the active user left
                     const newFocus = faces[0];
-                    activeUserIdRef.current = newFocus.user_id; // Switch active context
-                    
-                    setUserProfile({ user_id: newFocus.user_id, name: newFocus.name, status: "Auto-Detected" });
-                    
-                    if (newFocus.is_new) {
-                        setMessages(prev => [...prev, { sender: 'assistant', text: "Hello! I noticed you are new here. I'm Digital Brain. What is your name?" }]);
-                    } else {
+                    if (newFocus.user_id !== activeUserIdRef.current) {
+                        activeUserIdRef.current = newFocus.user_id;
+                        setUserProfile({ user_id: newFocus.user_id, name: newFocus.name, status: "Auto-Detected" });
                         setMessages(prev => [...prev, { sender: 'assistant', text: `Welcome back, ${newFocus.name}! Switching conversation context.` }]);
                     }
                 }
@@ -243,7 +311,7 @@ function App() {
         }
     };
 
-    // Motion Detection Setup and Logic
+    // Local Motion Tracker
     const checkMotion = () => {
         if (isRecording || isIdentifying || isInputFocusedRef.current) return false;
         const video = webcamRef.current?.video;
@@ -259,7 +327,7 @@ function App() {
         const motionCanvas = motionCanvasRef.current;
         const ctx = motionCanvas.getContext('2d', { willReadFrequently: true });
         ctx.drawImage(video, 0, 0, motionCanvas.width, motionCanvas.height);
-        
+
         const currentFrame = ctx.getImageData(0, 0, motionCanvas.width, motionCanvas.height);
         const currentData = currentFrame.data;
         const lastData = lastFrameDataRef.current;
@@ -268,63 +336,79 @@ function App() {
 
         if (lastData) {
             let diffPixels = 0;
-            
             const faces = detectedFacesRef.current;
             const videoW = video.videoWidth;
             const videoH = video.videoHeight;
             const motionW = motionCanvas.width;
             const motionH = motionCanvas.height;
 
-            // Map face bounding boxes to the motion canvas scale and add padding (75% margin to ignore shifting)
-            const paddedBoxes = faces.map(f => {
+            const userStats = faces.map(f => {
                 const bx = (f.box.x / videoW) * motionW;
                 const by = (f.box.y / videoH) * motionH;
                 const bw = (f.box.w / videoW) * motionW;
                 const bh = (f.box.h / videoH) * motionH;
-                
-                const marginX = bw * 0.75;
-                const marginY = bh * 0.75;
-                
+                const paddingX = bw * 0.75;
+                const paddingY = bh * 0.75;
                 return {
-                    x: Math.max(0, bx - marginX),
-                    y: Math.max(0, by - marginY),
-                    w: bw + marginX * 2,
-                    h: bh + marginY * 2
+                    face: f, bx, by, bw, bh,
+                    minX: Math.max(0, bx - paddingX),
+                    minY: Math.max(0, by - paddingY),
+                    maxX: Math.min(motionW, bx + bw + paddingX),
+                    maxY: Math.min(motionH, by + bh + paddingY),
+                    sumX: 0, sumY: 0, count: 0
                 };
             });
 
             for (let y = 0; y < motionH; y++) {
                 for (let x = 0; x < motionW; x++) {
-                    // Check if current pixel is inside any known face box
-                    let insideUser = false;
-                    for (const box of paddedBoxes) {
-                        if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) {
-                            insideUser = true;
-                            break;
-                        }
-                    }
-                    if (insideUser) continue; // Ignore motion from existing users
-
                     const i = (y * motionW + x) * 4;
                     const diffR = Math.abs(currentData[i] - lastData[i]);
                     const diffG = Math.abs(currentData[i + 1] - lastData[i + 1]);
                     const diffB = Math.abs(currentData[i + 2] - lastData[i + 2]);
-                    
-                    // Average difference > threshold
+
                     if ((diffR + diffG + diffB) / 3 > 45) {
-                        diffPixels++;
+                        let matched = false;
+                        for (const u of userStats) {
+                            if (x >= u.minX && x <= u.maxX && y >= u.minY && y <= u.maxY) {
+                                u.sumX += x;
+                                u.sumY += y;
+                                u.count++;
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if (!matched) diffPixels++;
                     }
                 }
             }
 
-            // If more than 3% of pixels changed (outside of known users)
-            const motionThreshold = (motionW * motionH) * 0.03;
-            if (diffPixels > motionThreshold) {
+            let facesMovedLocally = false;
+            for (const u of userStats) {
+                const paddedArea = (u.maxX - u.minX) * (u.maxY - u.minY);
+                if (u.count > paddedArea * 0.02) {
+                    const motionCX = u.sumX / u.count;
+                    const motionCY = u.sumY / u.count;
+                    const currentCX = u.bx + u.bw / 2;
+                    const currentCY = u.by + u.bh / 2;
+                    const newCX = currentCX + (motionCX - currentCX) * 0.15;
+                    const newCY = currentCY + (motionCY - currentCY) * 0.15;
+
+                    u.face.box.x = (newCX - u.bw / 2) * (videoW / motionW);
+                    u.face.box.y = (newCY - u.bh / 2) * (videoH / motionH);
+                    facesMovedLocally = true;
+                }
+            }
+
+            if (facesMovedLocally) {
+                setDetectedFaces([...faces]);
+                drawBoundingBoxes(faces);
+            }
+
+            if (diffPixels > (motionW * motionH) * 0.03) {
                 motionDetected = true;
             }
         }
 
-        // Save current frame for next tick
         lastFrameDataRef.current = new Uint8ClampedArray(currentData);
         return motionDetected;
     };
@@ -405,7 +489,7 @@ function App() {
                             User: {userProfile ? userProfile.name : 'Not Identified'} | {userProfile ? userProfile.status : 'Awaiting Input'}
                         </div>
                     </div>
-                    
+
                     {/* Top Right Buttons */}
                     <div style={{ display: 'flex', gap: '8px', zIndex: 10 }}>
                         <button
@@ -437,10 +521,10 @@ function App() {
                             disabled={isIdentifying || isRecording}
                         >
                             <span style={{
-                                width: '8px', 
-                                height: '8px', 
-                                backgroundColor: isAutoDetectEnabled ? '#fff' : '#d1d5db', 
-                                borderRadius: '50%', 
+                                width: '8px',
+                                height: '8px',
+                                backgroundColor: isAutoDetectEnabled ? '#fff' : '#d1d5db',
+                                borderRadius: '50%',
                                 display: 'inline-block',
                                 boxShadow: isAutoDetectEnabled ? '0 0 5px #fff' : 'none'
                             }} />

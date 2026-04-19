@@ -51,18 +51,30 @@ class VisionModule:
             return []
 
         try:
-            # DeepFace.represent returns a list of dictionaries (one for each face).
+            # Use extract_faces with mtcnn for tight, face-fitting bounding boxes
+            extracted = DeepFace.extract_faces(
+                img_path=frame,
+                detector_backend="mtcnn",
+                enforce_detection=False,
+                align=False
+            )
+
+            # Also get embeddings via represent
             representations = DeepFace.represent(
-                img_path=frame, 
-                model_name=self.model_name, 
+                img_path=frame,
+                model_name=self.model_name,
+                detector_backend="mtcnn",
                 enforce_detection=False
             )
-            
+
             faces = []
-            for rep in representations:
-                # Calculate w and h from x, y, left_eye, right_eye if DeepFace doesn't provide standard w/h natively
-                # Actually, DeepFace provides `facial_area` containing x, y, w, h
-                area = rep.get("facial_area", {})
+            # Pair extracted face boxes with their embeddings
+            count = min(len(extracted), len(representations))
+            for i in range(count):
+                ext = extracted[i]
+                rep = representations[i]
+
+                area = ext.get("facial_area", {})
                 faces.append({
                     "embedding": rep["embedding"],
                     "box": {

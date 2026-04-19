@@ -21,3 +21,8 @@ python-dotenv
 flask-cors
 av
 soundfile
+
+# RAG
+sentence-transformers
+langchain-text-splitters
+PyPDF2
