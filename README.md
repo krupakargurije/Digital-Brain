@@ -36,24 +36,26 @@ Unlike standard chatbots, Digital Brain *remembers who you are*. It recognizes y
 ## 🏗️ System Architecture
 
 ```mermaid
-graph TD;
-    Client[React Frontend] -->|Base64 Media & Chat| API[Flask API Routes]
-    API -->|Concurrent Threads| Perception[Perception Engine]
-    API --> Cognition[Cognition & RAG Engine]
+graph TD
+    Client["React Frontend"] -->|"Base64 Media & Chat"| API["Flask API Routes"]
     
-    subgraph Perception Engine
-        Face[VisionModule: DeepFace]
-        Voice[VoiceModule: SpeechBrain]
+    subgraph AI Modules
+        PE["Perception Engine"]
+        Cognition["Cognition & RAG Engine"]
+    end
+
+    API -->|"Concurrent Threads"| PE
+    API --> Cognition
+    
+    subgraph Databases
+        RDB[("SQLite (Working Memory)")]
+        VDB[("ChromaDB (Episodic Memory)")]
     end
     
-    subgraph Database Layer
-        RDB[(SQLite: Working Memory)]
-        VDB[(ChromaDB: Episodic Memory)]
-    end
-    
-    Perception --> VDB
-    Cognition <-->|Context Search & Fact Extract| Database Layer
-    Cognition -->|Injected Prompt| LLM[NVIDIA / LLaMA 3.1 LLM]
+    PE -->|"Biometric Tensors"| VDB
+    Cognition <-->|"Context & Facts"| RDB
+    Cognition <-->|"Vector Search"| VDB
+    Cognition -->|"Injected Prompt"| LLM["LLaMA 3.1 LLM"]
 ```
 
 ---
