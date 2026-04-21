@@ -7,7 +7,7 @@ speechbrain
 huggingface-hub<0.26.0
 torch
 torchaudio
-tf-keras
+tensorflow
 
 # Vector Database
 chromadb
@@ -18,9 +18,11 @@ openai
 # Utils
 numpy<2.0
 python-dotenv
+flask
 flask-cors
 av
 soundfile
+gunicorn
 
 # RAG
 sentence-transformers
